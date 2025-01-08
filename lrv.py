@@ -4,6 +4,8 @@ import niquests as requests
 from bh1745 import BH1745
 from luma.core import cmdline
 from PIL import Image, ImageDraw, ImageFont
+import json
+import os
 
 # Set up the BH1745 sensor
 bh1745 = BH1745()
@@ -29,6 +31,27 @@ try:
     large_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
 except IOError:
     large_font = font  # Fallback to default if the font isn't available
+
+# Add these constants near the top of the file, after the imports
+CALIBRATION_SAMPLES = {
+    "White Reference (96%)": 96.0,  # Example: Pure white paper/card
+    "Mid Gray (50%)": 50.0,        # Example: Mid gray card
+    "Black Reference (4%)": 4.0     # Example: Dark black card/surface
+}
+
+CALIBRATION_FILE = "lrv_calibration.json"
+
+def save_calibration(scaling_factor):
+    with open(CALIBRATION_FILE, 'w') as f:
+        json.dump({'scaling_factor': scaling_factor}, f)
+
+def load_calibration():
+    try:
+        with open(CALIBRATION_FILE, 'r') as f:
+            data = json.load(f)
+            return data.get('scaling_factor', None)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
 
 def get_color_name(hex_color):
     """Get the color name from the Color API"""
@@ -64,16 +87,66 @@ def draw_bar(draw, y_position, value, label):
     # Draw label
     draw.text((0, y_position), label, font=font, fill="white")
 
-def calculate_lrv(r, g, b, c):
+def calibrate_lrv():
     """
-    Calculate approximate Light Reflectance Value (LRV)
+    Calibrate the LRV calculation using known reference samples.
+    Returns the calibrated scaling factor.
+    """
+    scaling_factors = []
+    print("\nLRV Calibration Process")
+    print("=======================")
+    
+    for sample_name, known_lrv in CALIBRATION_SAMPLES.items():
+        input(f"\nPlace the {sample_name} sample under the sensor and press Enter...")
+        
+        # Take multiple readings and average them for stability
+        readings = []
+        for _ in range(5):
+            raw_r, raw_g, raw_b, raw_c = bh1745.get_rgbc_raw()
+            if raw_c == 0:
+                continue
+                
+            r_norm = raw_r / raw_c
+            g_norm = raw_g / raw_c
+            b_norm = raw_b / raw_c
+            
+            # Calculate relative luminance
+            luminance = (0.2126 * r_norm) + (0.7152 * g_norm) + (0.0722 * b_norm)
+            readings.append(luminance)
+            time.sleep(0.2)
+        
+        if not readings:
+            print(f"Failed to get valid readings for {sample_name}")
+            continue
+            
+        avg_luminance = sum(readings) / len(readings)
+        
+        # Calculate scaling factor needed to match known LRV
+        if avg_luminance > 0:
+            scaling_factor = known_lrv / avg_luminance
+            scaling_factors.append(scaling_factor)
+            print(f"Sample: {sample_name}")
+            print(f"Measured luminance: {avg_luminance:.4f}")
+            print(f"Calculated scaling factor: {scaling_factor:.2f}")
+    
+    if not scaling_factors:
+        return 100.0  # Default scaling factor
+        
+    # Use median scaling factor to avoid outliers
+    final_scaling = sum(scaling_factors) / len(scaling_factors)
+    print(f"\nFinal calibrated scaling factor: {final_scaling:.2f}")
+    return final_scaling
+
+# Modify the calculate_lrv function to use the calibrated scaling factor
+def calculate_lrv(r, g, b, c, scaling_factor):
+    """
+    Calculate calibrated Light Reflectance Value (LRV)
     
     Using CIE luminance coefficients (Y from CIE XYZ):
     - Red contribution: 0.2126
     - Green contribution: 0.7152
     - Blue contribution: 0.0722
     """
-    # First normalize RGB values using the Clear reading
     if c == 0:
         return 0
         
@@ -84,12 +157,27 @@ def calculate_lrv(r, g, b, c):
     # Calculate relative luminance using CIE coefficients
     luminance = (0.2126 * r_norm) + (0.7152 * g_norm) + (0.0722 * b_norm)
     
-    # Scale to 0-100 range and apply gamma correction
-    # Note: This scaling factor might need calibration for your specific setup
-    scaling_factor = 100.0
+    # Scale to 0-100 range using calibrated scaling factor
     lrv = min(100, luminance * scaling_factor)
     
     return round(lrv, 1)
+
+# Modify the main loop to use calibration
+# Add this right before the main try/while loop:
+print("Checking for existing calibration...")
+scaling_factor = load_calibration()
+if scaling_factor is None:
+    print("No calibration found. Starting calibration process...")
+    scaling_factor = calibrate_lrv()
+    save_calibration(scaling_factor)
+    print("Calibration saved.")
+else:
+    print(f"Using existing calibration (scaling factor: {scaling_factor:.2f})")
+    recalibrate = input("Would you like to recalibrate? (y/n): ").lower().strip() == 'y'
+    if recalibrate:
+        scaling_factor = calibrate_lrv()
+        save_calibration(scaling_factor)
+        print("New calibration saved.")
 
 time.sleep(1.0)  # Skip the reading that happened before the LEDs were enabled
 
@@ -138,7 +226,7 @@ try:
         print(f"Clear: {raw_c}")
         
         raw_r, raw_g, raw_b, raw_c = bh1745.get_rgbc_raw()
-        lrv = calculate_lrv(raw_r, raw_g, raw_b, raw_c)
+        lrv = calculate_lrv(raw_r, raw_g, raw_b, raw_c, scaling_factor)
         
         # Add LRV to display and console output
         draw.text((0, 85), f"LRV: {lrv}%", font=font, fill="white")
