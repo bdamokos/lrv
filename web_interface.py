@@ -28,6 +28,19 @@ HTML_TEMPLATE = '''
             padding: 0 20px;
             background-color: #f0f0f0;
         }
+        .chips-container {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .chip-wrapper {
+            flex: 1;
+        }
+        .chip-label {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+            color: #666;
+        }
         .color-chip {
             width: 200px;
             height: 200px;
@@ -56,7 +69,16 @@ HTML_TEMPLATE = '''
     <h1>LRV Sensor Data</h1>
     
     <div class="data-container">
-        <div class="color-chip" id="colorChip"></div>
+        <div class="chips-container">
+            <div class="chip-wrapper">
+                <div class="chip-label">Normalized Color</div>
+                <div class="color-chip" id="colorChip"></div>
+            </div>
+            <div class="chip-wrapper">
+                <div class="chip-label">Raw Sensor Color</div>
+                <div class="color-chip" id="rawColorChip"></div>
+            </div>
+        </div>
         
         <div class="value-display">
             <strong>Color:</strong> <span id="colorHex"></span>
@@ -89,7 +111,18 @@ HTML_TEMPLATE = '''
             fetch('/data')
                 .then(response => response.json())
                 .then(data => {
+                    // Update both color chips
                     document.getElementById('colorChip').style.backgroundColor = data.color_hex;
+                    
+                    // Calculate raw color hex from raw RGB values
+                    const rawMax = Math.max(data.raw.r, data.raw.g, data.raw.b);
+                    const scale = rawMax > 0 ? 255 / rawMax : 1;
+                    const rawHex = '#' + 
+                        Math.round(data.raw.r * scale).toString(16).padStart(2, '0') +
+                        Math.round(data.raw.g * scale).toString(16).padStart(2, '0') +
+                        Math.round(data.raw.b * scale).toString(16).padStart(2, '0');
+                    document.getElementById('rawColorChip').style.backgroundColor = rawHex;
+                    
                     document.getElementById('colorHex').textContent = data.color_hex;
                     document.getElementById('colorName').textContent = data.color_name;
                     document.getElementById('lrvValue').textContent = data.lrv.toFixed(1);
