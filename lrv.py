@@ -6,6 +6,7 @@ from luma.core import cmdline
 from PIL import Image, ImageDraw, ImageFont
 import json
 import os
+import argparse
 
 # Set up the BH1745 sensor
 bh1745 = BH1745()
@@ -162,22 +163,38 @@ def calculate_lrv(r, g, b, c, scaling_factor):
     
     return round(lrv, 1)
 
-# Modify the main loop to use calibration
-# Add this right before the main try/while loop:
-print("Checking for existing calibration...")
-scaling_factor = load_calibration()
-if scaling_factor is None:
-    print("No calibration found. Starting calibration process...")
-    scaling_factor = calibrate_lrv()
-    save_calibration(scaling_factor)
-    print("Calibration saved.")
+def parse_args():
+    parser = argparse.ArgumentParser(description='LRV Measurement Tool')
+    parser.add_argument('--calibrate', '-c', action='store_true',
+                       help='Force calibration even if existing calibration exists')
+    parser.add_argument('--skip-calibration', '-s', action='store_true',
+                       help='Skip calibration and use default scaling factor (100.0)')
+    return parser.parse_args()
+
+args = parse_args()
+
+if args.skip_calibration:
+    print("Skipping calibration, using default scaling factor (100.0)")
+    scaling_factor = 100.0
 else:
-    print(f"Using existing calibration (scaling factor: {scaling_factor:.2f})")
-    recalibrate = input("Would you like to recalibrate? (y/n): ").lower().strip() == 'y'
-    if recalibrate:
+    print("Checking for existing calibration...")
+    scaling_factor = load_calibration()
+    if scaling_factor is None or args.calibrate:
+        if args.calibrate:
+            print("Forced calibration requested...")
+        else:
+            print("No calibration found. Starting calibration process...")
         scaling_factor = calibrate_lrv()
         save_calibration(scaling_factor)
-        print("New calibration saved.")
+        print("Calibration saved.")
+    else:
+        print(f"Using existing calibration (scaling factor: {scaling_factor:.2f})")
+        if not args.calibrate:  # Only ask if not forcing calibration
+            recalibrate = input("Would you like to recalibrate? (y/n): ").lower().strip() == 'y'
+            if recalibrate:
+                scaling_factor = calibrate_lrv()
+                save_calibration(scaling_factor)
+                print("New calibration saved.")
 
 time.sleep(1.0)  # Skip the reading that happened before the LEDs were enabled
 
