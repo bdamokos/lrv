@@ -64,6 +64,33 @@ def draw_bar(draw, y_position, value, label):
     # Draw label
     draw.text((0, y_position), label, font=font, fill="white")
 
+def calculate_lrv(r, g, b, c):
+    """
+    Calculate approximate Light Reflectance Value (LRV)
+    
+    Using CIE luminance coefficients (Y from CIE XYZ):
+    - Red contribution: 0.2126
+    - Green contribution: 0.7152
+    - Blue contribution: 0.0722
+    """
+    # First normalize RGB values using the Clear reading
+    if c == 0:
+        return 0
+        
+    r_norm = r / c
+    g_norm = g / c
+    b_norm = b / c
+    
+    # Calculate relative luminance using CIE coefficients
+    luminance = (0.2126 * r_norm) + (0.7152 * g_norm) + (0.0722 * b_norm)
+    
+    # Scale to 0-100 range and apply gamma correction
+    # Note: This scaling factor might need calibration for your specific setup
+    scaling_factor = 100.0
+    lrv = min(100, luminance * scaling_factor)
+    
+    return round(lrv, 1)
+
 time.sleep(1.0)  # Skip the reading that happened before the LEDs were enabled
 
 try:
@@ -72,8 +99,10 @@ try:
         image = Image.new('1', (device.width, device.height))
         draw = ImageDraw.Draw(image)
         
-        # Get the RGB reading
-        r, g, b = bh1745.get_rgb_scaled()
+        # Get both raw and scaled readings
+        r, g, b = bh1745.get_rgb_scaled()  # Normalized using C internally
+        raw_r, raw_g, raw_b, raw_c = bh1745.get_rgbc_raw()  # Raw values including Clear
+        
         color_hex = f"#{r:02x}{g:02x}{b:02x}"
         
         # Get color name
@@ -98,9 +127,23 @@ try:
         print(f"Color: {color_hex}")
         if color_name:
             print(f"Name:  {color_name}")
+        print("\nNormalized values:")
         print(f"Red:   {r}")
         print(f"Green: {g}")
         print(f"Blue:  {b}")
+        print("\nRaw values:")
+        print(f"Red:   {raw_r}")
+        print(f"Green: {raw_g}")
+        print(f"Blue:  {raw_b}")
+        print(f"Clear: {raw_c}")
+        
+        raw_r, raw_g, raw_b, raw_c = bh1745.get_rgbc_raw()
+        lrv = calculate_lrv(raw_r, raw_g, raw_b, raw_c)
+        
+        # Add LRV to display and console output
+        draw.text((0, 85), f"LRV: {lrv}%", font=font, fill="white")
+        
+        print(f"\nEstimated LRV: {lrv}%")
         
         time.sleep(1.0)  # Changed to 1 second update frequency
 
