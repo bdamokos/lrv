@@ -44,6 +44,14 @@ CALIBRATION_SAMPLES = {
 
 CALIBRATION_FILE = "lrv_calibration.json"
 
+# Add these constants after the CALIBRATION_SAMPLES
+# Approximate peak sensitivity ratios from the graph
+SENSITIVITY_CORRECTIONS = {
+    'red': 0.7,    # Peak around 615nm with ~0.7 relative sensitivity
+    'green': 1.0,  # Peak around 540nm with ~1.0 relative sensitivity
+    'blue': 0.55   # Peak around 465nm with ~0.55 relative sensitivity
+}
+
 def save_calibration(scaling_factor):
     with open(CALIBRATION_FILE, 'w') as f:
         json.dump({'scaling_factor': scaling_factor}, f)
@@ -140,12 +148,32 @@ def calibrate_lrv():
     print(f"\nFinal calibrated scaling factor: {final_scaling:.2f}")
     return final_scaling
 
-# Modify the calculate_lrv function to use the calibrated scaling factor
+def get_corrected_rgb(raw_r, raw_g, raw_b, raw_c):
+    """Get RGB values corrected for sensor sensitivity"""
+    if raw_c == 0:
+        return (0, 0, 0)
+        
+    # Apply sensitivity corrections
+    r_corrected = raw_r / SENSITIVITY_CORRECTIONS['red']
+    g_corrected = raw_g / SENSITIVITY_CORRECTIONS['green']
+    b_corrected = raw_b / SENSITIVITY_CORRECTIONS['blue']
+    
+    # Normalize and scale to 0-255
+    max_val = max(r_corrected, g_corrected, b_corrected)
+    if max_val > 0:
+        scale = 255.0 / max_val
+        return (
+            min(255, int(r_corrected * scale)),
+            min(255, int(g_corrected * scale)),
+            min(255, int(b_corrected * scale))
+        )
+    return (0, 0, 0)
+
 def calculate_lrv(r, g, b, c, scaling_factor):
     """
     Calculate calibrated Light Reflectance Value (LRV)
     
-    Using CIE luminance coefficients (Y from CIE XYZ):
+    Using CIE luminance coefficients (Y from CIE XYZ) and sensor sensitivity corrections:
     - Red contribution: 0.2126
     - Green contribution: 0.7152
     - Blue contribution: 0.0722
@@ -153,9 +181,15 @@ def calculate_lrv(r, g, b, c, scaling_factor):
     if c == 0:
         return 0
         
-    r_norm = r / c
-    g_norm = g / c
-    b_norm = b / c
+    # Apply sensitivity corrections to raw values
+    r_corrected = r / SENSITIVITY_CORRECTIONS['red']
+    g_corrected = g / SENSITIVITY_CORRECTIONS['green']
+    b_corrected = b / SENSITIVITY_CORRECTIONS['blue']
+    
+    # Normalize using clear reading
+    r_norm = r_corrected / c
+    g_norm = g_corrected / c
+    b_norm = b_corrected / c
     
     # Calculate relative luminance using CIE coefficients
     luminance = (0.2126 * r_norm) + (0.7152 * g_norm) + (0.0722 * b_norm)
@@ -215,8 +249,8 @@ try:
         draw = ImageDraw.Draw(image)
         
         # Get both raw and scaled readings
-        r, g, b = bh1745.get_rgb_scaled()  # Normalized using C internally
-        raw_r, raw_g, raw_b, raw_c = bh1745.get_rgbc_raw()  # Raw values including Clear
+        raw_r, raw_g, raw_b, raw_c = bh1745.get_rgbc_raw()
+        r, g, b = get_corrected_rgb(raw_r, raw_g, raw_b, raw_c)
         
         color_hex = f"#{r:02x}{g:02x}{b:02x}"
         
