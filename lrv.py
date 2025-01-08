@@ -7,6 +7,8 @@ from PIL import Image, ImageDraw, ImageFont
 import json
 import os
 import argparse
+import threading
+from web_interface import start_server, update_data
 
 # Set up the BH1745 sensor
 bh1745 = BH1745()
@@ -169,9 +171,17 @@ def parse_args():
                        help='Force calibration even if existing calibration exists')
     parser.add_argument('--skip-calibration', '-s', action='store_true',
                        help='Skip calibration and use default scaling factor (100.0)')
+    parser.add_argument('--no-web', action='store_true',
+                       help='Disable web interface')
     return parser.parse_args()
 
 args = parse_args()
+
+# Start web server if not disabled
+if not args.no_web:
+    print("Starting web interface on port 8080...")
+    web_thread = threading.Thread(target=start_server, daemon=True)
+    web_thread.start()
 
 if args.skip_calibration:
     print("Skipping calibration, using default scaling factor (100.0)")
@@ -251,6 +261,15 @@ try:
         print(f"\nEstimated LRV: {lrv}%")
         
         time.sleep(1.0)  # Changed to 1 second update frequency
+
+        if not args.no_web:
+            update_data(
+                color_hex,
+                color_name,
+                lrv,
+                {'r': r, 'g': g, 'b': b},
+                {'r': raw_r, 'g': raw_g, 'b': raw_b, 'c': raw_c}
+            )
 
 except KeyboardInterrupt:
     print("\nProgram terminated by user")
